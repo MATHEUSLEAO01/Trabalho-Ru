@@ -1,22 +1,31 @@
-#include <stdio.h> // nesse codigo apenas mudar voida simular
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include "trabalho.h"
+
+// Definição das variáveis globais
+Bancada bancadas[QTDBANMAX];
+Ingrediente ingredientes[NING];
+float tempo_total_simulacao = 0.0;
+
 void inicializar() {
+    srand(time(NULL));
     for (int i = 0; i < QTDBANMAX; i++) {
         bancadas[i].id = i + 1;
         bancadas[i].num_serventes = BANSERMIN + rand() % (BANSERMAX - BANSERMIN + 1);
         bancadas[i].atendidos = 0;
         bancadas[i].tempo_atendimento = 0.0;
+        bancadas[i].ativa = 1;
+        bancadas[i].vegana = (i == 0); // Primeira bancada é vegana
         
-        // Inicializa a fila vegana
         inicializarFila(&bancadas[i].fila_vegana);
 
         for (int j = 0; j < bancadas[i].num_serventes; j++) {
             bancadas[i].serventes[j].id = j + 1;
             bancadas[i].serventes[j].atendidos = 0;
             bancadas[i].serventes[j].tempo_atendimento = 0.0;
+            bancadas[i].serventes[j].em_intervalo = 0;
         }
     }
 
@@ -25,6 +34,7 @@ void inicializar() {
         ingredientes[i].quantidade_consumida = 0;
     }
 }
+
 void inicializarFila(Fila *fila) {
     fila->frente = NULL;
     fila->tras = NULL;
@@ -41,13 +51,13 @@ void enfileirar(Fila *fila, int usuario_id) {
     fila->tras = novo_usuario;
 
     if (!fila->frente) {
-        fila->frente = novo_usuario; // Se a fila estava vazia, frente e trás apontam para o novo usuário
+        fila->frente = novo_usuario;
     }
 }
 
 int desenfileirar(Fila *fila) {
     if (!fila->frente) {
-        return -1; // Fila vazia
+        return -1;
     }
 
     Usuario *usuario_removido = fila->frente;
@@ -55,7 +65,7 @@ int desenfileirar(Fila *fila) {
     fila->frente = fila->frente->proximo;
 
     if (!fila->frente) {
-        fila->tras = NULL; // Se a fila ficou vazia, trás também deve ser nulo
+        fila->tras = NULL;
     }
 
     free(usuario_removido);
@@ -67,107 +77,116 @@ int filaVazia(Fila *fila) {
 }
 
 void simular() {
-    srand(time(NULL));
-    int total_usuarios = 100;
-    int usuarios_atendidos = 0;
-    float tempo_total_simulacao = 0.0;
+    struct {
+        int quantidade_atual;
+        time_t ultimo_reabastecimento;
+        int precisa_repor;
+    } vasilhas[NING];
+    
+    for(int i = 0; i < NING; i++) {
+        vasilhas[i].quantidade_atual = CAPING1;
+        vasilhas[i].ultimo_reabastecimento = time(NULL);
+        vasilhas[i].precisa_repor = 0;
+    }
 
-    while (usuarios_atendidos < total_usuarios) {
-        // Simule se o usuário é vegano (vai ter que mudar quem vai fornecer esse dado é o usuario)
-        int usuario_vegano = rand() % 5 == 0; // 20% de chance de ser vegano
-
-        if (usuario_vegano) {
-            // Enfileirar usuário vegano na fila 
-            enfileirar(&bancadas[VEGA_BAN_ID].fila_vegana, usuarios_atendidos + 1); // ID do usuário
+    while(tempo_total_simulacao < TEMPSIMJ) {
+        if(tempo_total_simulacao < TEMPSIMAM) {
+            printf("Período: Manhã\n");
+        } else if(tempo_total_simulacao < TEMPSIMPM) {
+            printf("Período: Almoço\n");
         } else {
-            // Escolher uma bancada ativa que não seja vegana 
-            int bancada_idx = rand() % QTDBANMAX;
-            while (!bancadas[bancada_idx].ativa) {
-                bancada_idx = rand() % QTDBANMAX;
+            printf("Período: Jantar\n");
+        }
+
+        atualizarBancadas(tempo_total_simulacao);
+
+        int tempo_atendimento = TEMPUSUMIN + (rand() % (TEMPUSUMAX - TEMPUSUMIN + 1));
+        
+        for(int i = 0; i < NING; i++) {
+            if(vasilhas[i].quantidade_atual < QTDMINING1 || 
+               difftime(time(NULL), vasilhas[i].ultimo_reabastecimento) > TEMPING1) {
+                
+                vasilhas[i].precisa_repor = 1;
+                tempo_total_simulacao += TEMPING1;
+                vasilhas[i].quantidade_atual = CAPING1;
+                vasilhas[i].ultimo_reabastecimento = time(NULL);
+                printf("Vasilha %d foi reabastecida\n", i+1);
             }
 
-            // Escolher um servente da bancada
-            int servente_idx = rand() % bancadas[bancada_idx].num_serventes;
-            Servente *servente = &bancadas[bancada_idx].serventes[servente_idx];
-
-            if (servente->em_intervalo) {
-                continue; // Se o servente estiver em intervalo, pula
-            }
-
-            // Simulação de atendimento
-            float tempo_atendimento = 1.0 + (rand() % 5);
-            tempo_total_simulacao += tempo_atendimento;
-
-            servente->tempo_atendimento += tempo_atendimento;
-            servente->atendidos++;
-            bancadas[bancada_idx].atendidos++;
-            bancadas[bancada_idx].tempo_atendimento += tempo_atendimento;
-
-            // Intervalo do servente (vai ter que mudar)
-            if (servente->atendidos % 5 == 0) {
-                servente->em_intervalo = 1; // Coloca em intervalo
-                tempo_total_simulacao += 15.0; // Adiciona tempo de intervalo
-                servente->em_intervalo = 0; // Retorna ao normal
+            if(rand() % 100 < NPROBING1) {
+                int quantidade = QTDMINING1 + rand() % (QTDMAXING1 - QTDMINING1 + 1);
+                if(quantidade <= vasilhas[i].quantidade_atual) {
+                    armazenarConsumo(i+1, quantidade);
+                    vasilhas[i].quantidade_atual -= quantidade;
+                }
             }
         }
 
-        // Atendimento de usuários veganos da fila
-        while (!filaVazia(&bancadas[VEGA_BAN_ID].fila_vegana)) {
-            int usuario_id = desenfileirar(&bancadas[VEGA_BAN_ID].fila_vegana);
-            // Escolhe um servente para atender o usuário vegano
-            int servente_idx = rand() % bancadas[VEGA_BAN_ID].num_serventes;
-            Servente *servente = &bancadas[VEGA_BAN_ID].serventes[servente_idx];
-
-            if (servente->em_intervalo) {
-                continue; // Se o servente estiver em intervalo, pula
-            }
-
-            float tempo_atendimento = 1.0 + (rand() % 5);
-            tempo_total_simulacao += tempo_atendimento;
-
-            servente->tempo_atendimento += tempo_atendimento;
-            servente->atendidos++;
-            bancadas[VEGA_BAN_ID].atendidos++;
-            bancadas[VEGA_BAN_ID].tempo_atendimento += tempo_atendimento;
-
-            // Intervalo do servente (vai ter que mudar)
-            if (servente->atendidos % 5 == 0) {
-                servente->em_intervalo = 1; // Coloca em intervalo
-                tempo_total_simulacao += 15.0; // Adiciona tempo de intervalo
-                servente->em_intervalo = 0; // Retorna ao normal
-            }
-        }
-
-        usuarios_atendidos++;
+        tempo_total_simulacao += tempo_atendimento;
     }
 
     relatorio_final();
 }
-void atualizarBancadas(int tempo_total_simulacao) {
-    for (int i = 0; i < QTDBANMAX; i++) {
-        // Ativa bancadas em horários de pico (por exemplo, a cada 30 minutos) vai ter que mudar para uma verificação de permissão
-        if (tempo_total_simulacao % 30 == 0) {
-            bancadas[i].ativa = 1; // Ativa a bancada
-        }
 
-        // Desativa bancadas após certo tempo de inatividade
-        if (bancadas[i].atendidos < 5 && tempo_total_simulacao > 60) {
-            bancadas[i].ativa = 0; // Desativa a bancada
+void atualizarBancadas(int tempo_total_simulacao) {
+    if(tempo_total_simulacao < TEMPSIMAM) {
+        int bancadas_ativas = 0;
+        for(int i = 0; i < QTDBANMAX; i++) {
+            if(bancadas[i].ativa) bancadas_ativas++;
+        }
+        
+        if(bancadas_ativas < QTDBANMIN) {
+            for(int i = 0; i < QTDBANMAX && bancadas_ativas < QTDBANMIN; i++) {
+                if(!bancadas[i].ativa) {
+                    bancadas[i].ativa = 1;
+                    bancadas_ativas++;
+                }
+            }
+        }
+    }
+    else if(tempo_total_simulacao < TEMPSIMPM) {
+        for(int i = 0; i < QTDBANMAX; i++) {
+            bancadas[i].ativa = 1;
+        }
+    }
+    else {
+        int bancada_desativada = 0;
+        for(int i = 0; i < QTDBANMAX && !bancada_desativada; i++) {
+            if(bancadas[i].ativa && !bancadas[i].vegana) {
+                bancadas[i].ativa = 0;
+                bancada_desativada = 1;
+            }
+        }
+    }
+}
+
+void armazenarConsumo(int ingrediente_id, int quantidade) {
+    if(ingrediente_id >= 1 && ingrediente_id <= NING) {
+        ingredientes[ingrediente_id - 1].quantidade_consumida += quantidade;
+        
+        FILE *fp = fopen("consumo_log.txt", "a");
+        if(fp != NULL) {
+            time_t now = time(NULL);
+            fprintf(fp, "Ingrediente %d: %d gramas consumidos em %s", 
+                    ingrediente_id, quantidade, ctime(&now));
+            fclose(fp);
         }
     }
 }
 
 void relatorio_final() {
-    // Impressão do relatório final
-    printf("Relatório Final:\n");
-    for (int i = 0; i < QTDBANMAX; i++) {
-        printf("Bancada %d: %d atendidos, Tempo médio de atendimento: %.2f\n",
-               bancadas[i].id, bancadas[i].atendidos,
-               bancadas[i].tempo_atendimento / bancadas[i].atendidos);
+    printf("\nRelatório Final:\n");
+    printf("\nConsumo de Ingredientes:\n");
+    for (int i = 0; i < NING; i++) {
+        printf("Ingrediente %d: %d gramas consumidos\n", 
+               ingredientes[i].id, ingredientes[i].quantidade_consumida);
     }
 
-    for (int i = 0; i < NING; i++) {
-        printf("Ingrediente %d consumido: %d gramas\n", ingredientes[i].id,
-               ingredientes[i].quantidade_consumida);
+    for (int i = 0; i < QTDBANMAX; i++) {
+        if(bancadas[i].atendidos > 0) {
+            printf("Bancada %d: %d atendidos, Tempo médio de atendimento: %.2f\n",
+                   bancadas[i].id, bancadas[i].atendidos,
+                   bancadas[i].tempo_atendimento / bancadas[i].atendidos);
+        }
     }
 }
