@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <windows.h> // Para usar Sleep
 #include "trabalho.h"
 
 // Definição das variáveis globais
@@ -89,19 +90,58 @@ void simular() {
         vasilhas[i].precisa_repor = 0;
     }
 
+    // Abrir o arquivo para gravação
+    FILE *fp = fopen("relatorio_atendimentos.txt", "w");
+    if (fp == NULL) {
+        printf("Erro ao abrir o arquivo de relatórios.\n");
+        return;
+    }
+
     while(tempo_total_simulacao < TEMPSIMJ) {
+        Sleep(1000); // Pausa a execução por 1 segundo
+        tempo_total_simulacao++;
+
+        // Geração aleatória de usuários
+        int num_novos_usuarios = rand() % 5; // Gera de 0 a 4 novos usuários
+        for (int i = 0; i < num_novos_usuarios; i++) {
+            int usuario_id = rand() % 1000; // ID aleatório para o usuário
+            int bancada_id = rand() % QTDBANMAX; // Escolhe uma bancada aleatória
+            enfileirar(&bancadas[bancada_id].fila_vegana, usuario_id); // Adiciona na fila da bancada escolhida
+        }
+
         if(tempo_total_simulacao < TEMPSIMAM) {
-            printf("Período: Manhã\n");
+            printf("\nPeríodo: Manhã\n");
         } else if(tempo_total_simulacao < TEMPSIMPM) {
-            printf("Período: Almoço\n");
+            printf("\nPeríodo: Almoço\n");
         } else {
-            printf("Período: Jantar\n");
+            printf("\nPeríodo: Jantar\n");
         }
 
         atualizarBancadas(tempo_total_simulacao);
 
-        int tempo_atendimento = TEMPUSUMIN + (rand() % (TEMPUSUMAX - TEMPUSUMIN + 1));
-        
+        // Simulação de atendimento
+        for (int i = 0; i < QTDBANMAX; i++) {
+            if (bancadas[i].ativa) {
+                while (!filaVazia(&bancadas[i].fila_vegana)) { // Atende todos os usuários na fila
+                    int usuario_id = desenfileirar(&bancadas[i].fila_vegana);
+                    bancadas[i].atendidos++; // Incrementa atendidos da bancada
+                    int tempo_atendimento = TEMPUSUMIN + rand() % (TEMPUSUMAX - TEMPUSUMIN + 1);
+                    bancadas[i].tempo_atendimento += tempo_atendimento; // Acumula o tempo de atendimento
+
+                    // Grava os dados no arquivo
+                    fprintf(fp, "Bancada %d, Servente %d, Tempo de Atendimento: %d segundos, Usuário ID: %d\n", 
+                            bancadas[i].id, bancadas[i].serventes[0].id, tempo_atendimento, usuario_id); // Exemplo com o primeiro servente
+
+                    // Aqui você pode adicionar lógica para determinar qual servente atende
+                    for (int j = 0; j < bancadas[i].num_serventes; j++) {
+                        bancadas[i].serventes[j].atendidos++; // Incrementa atendidos do servente
+                        bancadas[i].serventes[j].tempo_atendimento += tempo_atendimento; // Acumula o tempo de atendimento do servente
+                    }
+                }
+            }
+        }
+
+        // Atualização de vasilhas e outros processos
         for(int i = 0; i < NING; i++) {
             if(vasilhas[i].quantidade_atual < QTDMINING1 || 
                difftime(time(NULL), vasilhas[i].ultimo_reabastecimento) > TEMPING1) {
@@ -110,7 +150,7 @@ void simular() {
                 tempo_total_simulacao += TEMPING1;
                 vasilhas[i].quantidade_atual = CAPING1;
                 vasilhas[i].ultimo_reabastecimento = time(NULL);
-                printf("Vasilha %d foi reabastecida\n", i+1);
+                printf("\nVasilha %d foi reabastecida\n", i+1);
             }
 
             if(rand() % 100 < NPROBING1) {
@@ -121,11 +161,10 @@ void simular() {
                 }
             }
         }
-
-        tempo_total_simulacao += tempo_atendimento;
     }
 
-    relatorio_final();
+    fclose(fp); // Fecha o arquivo após a simulação
+    gerarRelatorios();
 }
 
 void atualizarBancadas(int tempo_total_simulacao) {
@@ -174,19 +213,60 @@ void armazenarConsumo(int ingrediente_id, int quantidade) {
     }
 }
 
-void relatorio_final() {
+void gerarRelatorios() {
     printf("\nRelatório Final:\n");
-    printf("\nConsumo de Ingredientes:\n");
-    for (int i = 0; i < NING; i++) {
-        printf("Ingrediente %d: %d gramas consumidos\n", 
-               ingredientes[i].id, ingredientes[i].quantidade_consumida);
+    int total_atendidos = 0;
+
+    // Declaração das variáveis relatorios_bancadas e relatorios_serventes
+    RelatorioBancada relatorios_bancadas[QTDBANMAX]; 
+    RelatorioServente relatorios_serventes[QTDBANMAX * BANSERMAX]; // Supondo que cada bancada tenha o máximo de serventes
+
+    // Inicialização das variáveis
+    for (int i = 0; i < QTDBANMAX; i++) {
+        relatorios_bancadas[i].bancada_id = bancadas[i].id;
+        relatorios_bancadas[i].total_atendidos = bancadas[i].atendidos;
+        relatorios_bancadas[i].tempo_medio_atendimento = (bancadas[i].atendidos > 0) ? (bancadas[i].tempo_atendimento / bancadas[i].atendidos) : 0.0;
+
+        printf("Bancada %d: %d atendidos\n", relatorios_bancadas[i].bancada_id, relatorios_bancadas[i].total_atendidos);
+        total_atendidos += relatorios_bancadas[i].total_atendidos;
+
+        for (int j = 0; j < bancadas[i].num_serventes; j++) {
+            relatorios_serventes[j].servente_id = bancadas[i].serventes[j].id;
+            relatorios_serventes[j].total_atendidos = bancadas[i].serventes[j].atendidos;
+            relatorios_serventes[j].tempo_medio_atendimento = (bancadas[i].serventes[j].atendidos > 0) ? (bancadas[i].serventes[j].tempo_atendimento / bancadas[i].serventes[j].atendidos) : 0.0;
+
+            printf("  Servente %d: %d atendidos\n", relatorios_serventes[j].servente_id, relatorios_serventes[j].total_atendidos);
+        }
     }
 
+    printf("\nTotal de usuários atendidos no dia: %d\n", total_atendidos);
+    exibirTemposMedios(relatorios_bancadas, relatorios_serventes); // Passar os parâmetros necessários
+    exibirTotaisIngredientes(); // Chama a função para exibir os totais de ingredientes
+}
+
+void exibirTemposMedios(RelatorioBancada *relatorios_bancadas, RelatorioServente *relatorios_serventes) {
+    printf("\n=== Tempo Médio de Atendimento ===\n");
+    
+    // Tempo médio de atendimento por bancada
     for (int i = 0; i < QTDBANMAX; i++) {
-        if(bancadas[i].atendidos > 0) {
-            printf("Bancada %d: %d atendidos, Tempo médio de atendimento: %.2f\n",
-                   bancadas[i].id, bancadas[i].atendidos,
-                   bancadas[i].tempo_atendimento / bancadas[i].atendidos);
+        if (bancadas[i].atendidos > 0) {
+            float tempo_medio_bancada = bancadas[i].tempo_atendimento / bancadas[i].atendidos;
+            printf("Bancada %d: %.2f segundos\n", bancadas[i].id, tempo_medio_bancada);
         }
+        
+        // Tempo médio de atendimento por servente
+        for (int j = 0; j < bancadas[i].num_serventes; j++) {
+            if (bancadas[i].serventes[j].atendidos > 0) {
+                float tempo_medio_servente = bancadas[i].serventes[j].tempo_atendimento / bancadas[i].serventes[j].atendidos;
+                printf("  Servente %d: %.2f segundos\n", bancadas[i].serventes[j].id, tempo_medio_servente);
+            }
+        }
+    }
+}
+
+void exibirTotaisIngredientes() {
+    printf("\nQuantidade total consumida de cada ingrediente:\n");
+    for (int i = 0; i < NING; i++) {
+        printf("Ingrediente %d: %d gramas consumidos\n", ingredientes[i].id, ingredientes[i].quantidade_consumida);
     }
 }
